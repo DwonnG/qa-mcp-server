@@ -1,0 +1,36 @@
+# Environment and secrets
+.env
+*.env.local
+
+# Config with real values (use config_example.py as template)
+config.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
