@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "qa-automation": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "JIRA_URL=https://your-jira.atlassian.net",
+        "-e", "JIRA_PERSONAL_TOKEN=your_jira_token",
+        "-e", "GITHUB_HOST=https://api.github.com",
+        "-e", "GITHUB_TOKEN=ghp_your_github_token",
+        "-e", "GITHUB_ORG=your-org",
+        "-e", "GITHUB_REPOS=repo1,repo2,repo3",
+        "-e", "JENKINS_URL=https://your-jenkins.com",
+        "-e", "JENKINS_USER=your_user",
+        "-e", "JENKINS_TOKEN=your_jenkins_token",
+        "-e", "AWS_REGION=us-east-1",
+        "-e", "WEBEX_TOKEN=your_webex_token",
+        "-v", "/path/to/.aws:/root/.aws:ro",
+        "qa-mcp-server:latest"
+      ]
+    }
+  }
+}
