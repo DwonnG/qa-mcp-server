@@ -16,7 +16,8 @@
         "-e", "AWS_REGION=us-east-1",
         "-e", "WEBEX_TOKEN=your_webex_token",
         "-v", "/path/to/.aws:/root/.aws:ro",
-        "qa-mcp-server:latest"
+        "-v", "/path/to/config.py:/app/config.py:ro",
+        "ghcr.io/dwonng/qa-mcp-server:latest"
       ]
     }
   }

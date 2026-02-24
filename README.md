@@ -4,6 +4,7 @@ An AI-powered QA automation server built on the [Model Context Protocol (MCP)](h
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fdwonng%2Fqa--mcp--server-blue)
 
 ## Features
 
@@ -45,34 +46,42 @@ An AI-powered QA automation server built on the [Model Context Protocol (MCP)](h
 - Docker (recommended) or local Python environment
 - API tokens for the services you want to use
 
-### Installation
+### Quick Install (Pre-built Image)
+
+Add to your MCP configuration (`~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "qa-automation": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "JIRA_URL=https://your-jira.atlassian.net",
+        "-e", "JIRA_PERSONAL_TOKEN=your_token",
+        "-e", "GITHUB_TOKEN=ghp_your_token",
+        "ghcr.io/dwonng/qa-mcp-server:latest"
+      ]
+    }
+  }
+}
+```
+
+### Full Installation
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/qa-mcp-server.git
+   git clone https://github.com/DwonnG/qa-mcp-server.git
    cd qa-mcp-server
    ```
 
-2. **Copy and configure settings**
+2. **Create your config**
    ```bash
    cp config_example.py config.py
-   cp examples/env.example .env
-   # Edit config.py with your Jira field IDs, Jenkins paths, JQL templates, etc.
-   # Edit .env with your API tokens
-   ```
-   
-   > **Important:** Your `config.py` must be mounted into the Docker container (see step 4) for custom settings to take effect.
-
-3. **Build the Docker image**
-   ```bash
-   docker build -t qa-mcp-server .
+   # Edit config.py with your Jira field IDs, Jenkins paths, etc.
    ```
 
-4. **Add to your MCP client** (e.g., Cursor, Claude Desktop)
-   
-   Add to your MCP configuration (e.g., `~/.cursor/mcp.json`).
-   
-   > **Note:** The `config.py` volume mount is required for custom JQL templates, field mappings, and Jenkins job paths to work. Update the path to match your local installation.
+3. **Add to your MCP client** with all integrations:
    ```json
    {
      "mcpServers": {
@@ -90,13 +99,15 @@ An AI-powered QA automation server built on the [Model Context Protocol (MCP)](h
            "-e", "AWS_REGION=us-east-1",
            "-e", "WEBEX_TOKEN=your_webex_token",
            "-v", "/path/to/.aws:/root/.aws:ro",
-           "-v", "/path/to/qa-mcp-server/config.py:/app/config.py:ro",
-           "qa-mcp-server:latest"
+           "-v", "/path/to/config.py:/app/config.py:ro",
+           "ghcr.io/dwonng/qa-mcp-server:latest"
          ]
        }
      }
    }
    ```
+
+> **Note:** Mount your `config.py` for custom JQL templates, field mappings, and Jenkins job paths.
 
 ### Local Development
 
