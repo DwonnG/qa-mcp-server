@@ -168,3 +168,54 @@ class WebexClient:
             }
         except httpx.HTTPError as e:
             return {"status": "error", "error": str(e)}
+
+    async def add_reaction(self, message_id: str, reaction: str) -> dict[str, Any]:
+        """Add a reaction to a message.
+        
+        Valid reactions: thumbsup, thumbsdown, heart, smiley, haha, celebrate,
+                        wow, disappointed, thinking, clapping
+        """
+        valid_reactions = {
+            "thumbsup", "thumbsdown", "heart", "smiley", "haha",
+            "celebrate", "wow", "disappointed", "thinking", "clapping",
+        }
+        
+        emoji_map = {
+            "\U0001f44d": "thumbsup",
+            "\U0001f44e": "thumbsdown",
+            "\u2764\ufe0f": "heart",
+            "\U0001f600": "smiley",
+            "\U0001f602": "haha",
+            "\U0001f389": "celebrate",
+            "\U0001f62e": "wow",
+            "\U0001f61e": "disappointed",
+            "\U0001f914": "thinking",
+            "\U0001f44f": "clapping",
+        }
+        
+        if reaction in emoji_map:
+            reaction = emoji_map[reaction]
+
+        reaction_lower = reaction.lower()
+        if reaction_lower not in valid_reactions:
+            return {
+                "status": "error",
+                "error": f"Invalid reaction '{reaction}'. Valid: thumbsup, thumbsdown, heart, smiley, haha, celebrate, wow, disappointed, thinking, clapping"
+            }
+        
+        client = await self._get_client()
+        try:
+            response = await client.post(
+                "/messages/reactions",
+                json={"parentId": message_id, "reaction": reaction_lower},
+            )
+            response.raise_for_status()
+            data = response.json()
+            return {
+                "status": "success",
+                "reaction_id": data.get("id"),
+                "message_id": message_id,
+                "reaction": reaction_lower,
+            }
+        except httpx.HTTPError as e:
+            return {"status": "error", "error": str(e)}

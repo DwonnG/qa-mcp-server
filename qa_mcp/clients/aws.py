@@ -7,7 +7,6 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-# Import config from package root
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 try:

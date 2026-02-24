@@ -5,7 +5,6 @@ from typing import Any
 
 import httpx
 
-# Import config from package root
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 try:
@@ -192,28 +191,53 @@ class JenkinsClient:
         branch: str = "main",
         environment: str = "",
         execution_mode: str = "regression",
+        test_tag: str = "",
+        pr_number: int = 0,
     ) -> dict[str, Any]:
-        """Trigger E2E tests for a repo with custom branch."""
+        """Trigger E2E tests for a repo with custom branch and test tag.
+        
+        Args:
+            repo: Repository name (e.g., python-raptor, directory-data)
+            branch: Branch name to test (uses repo-specific param name)
+            environment: Target environment (integration, qa, beta)
+            execution_mode: Test execution mode (regression, smoke, test_tag)
+            test_tag: Pytest marker/tag to run (e.g., bulk, inline, smoke)
+                      Only used when execution_mode is 'test_tag'
+            pr_number: PR number for PR-specific test runs
+        
+        Uses repo-specific branch parameter names (e.g., python_raptor_branch for python-raptor).
+        """
         if repo not in JENKINS_JOBS:
             return {
                 "status": "error",
                 "error": f"Unknown repo: {repo}. Known repos: {list(JENKINS_JOBS.keys())}",
             }
 
-        job_path = JENKINS_JOBS[repo].get("e2e")
+        job_config = JENKINS_JOBS[repo]
+        job_path = job_config.get("e2e")
         if not job_path:
             return {"status": "error", "error": f"No E2E job configured for {repo}"}
 
+        branch_param_name = job_config.get("branch_param", "branch")
+
         params: dict[str, str] = {
-            "branch": branch,
-            "environment": environment,
+            branch_param_name: branch,
             "execution_mode": execution_mode,
         }
+
+        if environment:
+            params["environment"] = environment
+        if test_tag:
+            params["test_tag"] = test_tag
+        if pr_number:
+            params["pr_number"] = str(pr_number)
 
         result = await self.trigger_build(job_path, params)
         result["repo"] = repo
         result["branch"] = branch
+        result["branch_param"] = branch_param_name
         result["environment"] = environment
+        result["test_tag"] = test_tag
         return result
 
     async def get_recent_builds(self, repo: str, job_type: str = "e2e", count: int = 5) -> dict[str, Any]:
@@ -243,5 +267,95 @@ class JenkinsClient:
                 for build in data.get("builds", [])
             ]
             return {"status": "success", "repo": repo, "job_type": job_type, "builds": builds}
+        except httpx.HTTPError as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_build_console(
+        self, repo: str, build_number: int, job_type: str = "e2e", tail_lines: int = 200
+    ) -> dict[str, Any]:
+        """Get console output from a specific build (last N lines)."""
+        if repo not in JENKINS_JOBS:
+            return {"status": "error", "error": f"Unknown repo: {repo}"}
+
+        job_path = JENKINS_JOBS[repo].get(job_type)
+        if not job_path:
+            return {"status": "error", "error": f"No {job_type} job configured for {repo}"}
+
+        client = await self._get_client()
+        url = f"/{job_path}/{build_number}/consoleText"
+
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            console_text = response.text
+
+            lines = console_text.strip().split("\n")
+            if len(lines) > tail_lines:
+                lines = lines[-tail_lines:]
+                truncated = True
+            else:
+                truncated = False
+
+            return {
+                "status": "success",
+                "repo": repo,
+                "build_number": build_number,
+                "truncated": truncated,
+                "total_lines": len(console_text.strip().split("\n")),
+                "lines_returned": len(lines),
+                "console_output": "\n".join(lines),
+            }
+        except httpx.HTTPError as e:
+            return {"status": "error", "error": str(e)}
+
+    async def get_build_test_report(
+        self, repo: str, build_number: int, job_type: str = "e2e"
+    ) -> dict[str, Any]:
+        """Get test report from a specific build showing failed tests."""
+        if repo not in JENKINS_JOBS:
+            return {"status": "error", "error": f"Unknown repo: {repo}"}
+
+        job_path = JENKINS_JOBS[repo].get(job_type)
+        if not job_path:
+            return {"status": "error", "error": f"No {job_type} job configured for {repo}"}
+
+        client = await self._get_client()
+        url = f"/{job_path}/{build_number}/testReport/api/json"
+
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+            data = response.json()
+
+            failed_tests = []
+            for suite in data.get("suites", []):
+                for case in suite.get("cases", []):
+                    if case.get("status") in ["FAILED", "REGRESSION"]:
+                        failed_tests.append({
+                            "name": case.get("name"),
+                            "class_name": case.get("className"),
+                            "status": case.get("status"),
+                            "duration": case.get("duration"),
+                            "error_details": case.get("errorDetails", "")[:500],  # Truncate long errors
+                            "error_stack": case.get("errorStackTrace", "")[:1000],  # Truncate stack traces
+                        })
+
+            return {
+                "status": "success",
+                "repo": repo,
+                "build_number": build_number,
+                "total_tests": data.get("totalCount", 0),
+                "passed": data.get("passCount", 0),
+                "failed": data.get("failCount", 0),
+                "skipped": data.get("skipCount", 0),
+                "failed_tests": failed_tests,
+            }
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return {
+                    "status": "error",
+                    "error": "No test report found for this build. The build may not have run tests or uses a different reporting format.",
+                }
+            return {"status": "error", "error": str(e)}
         except httpx.HTTPError as e:
             return {"status": "error", "error": str(e)}

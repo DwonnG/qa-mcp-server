@@ -5,13 +5,11 @@ from typing import Any
 
 import httpx
 
-# Import config from package root
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 try:
     from config import JIRA_FIELDS, JIRA_TRANSITIONS, TEST_RESULT_VALUES
 except ImportError:
-    # Fallback defaults if config not present
     JIRA_FIELDS = {"validator": "customfield_XXXXX", "test_result": "customfield_XXXXX", "team": "customfield_XXXXX"}
     JIRA_TRANSITIONS = {}
     TEST_RESULT_VALUES = {}
@@ -29,8 +27,6 @@ class JiraClient:
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            # Set verify=False for self-signed certs (e.g., corporate Jira)
-            # Set verify=True for Atlassian Cloud
             verify_ssl = os.getenv("JIRA_VERIFY_SSL", "true").lower() != "false"
             self._client = httpx.AsyncClient(
                 base_url=f"{self.base_url}/rest/api/2",
@@ -66,8 +62,7 @@ class JiraClient:
         data = response.json()
         
         fields = data.get("fields", {})
-        
-        # Extract comments
+
         comments = []
         for c in fields.get("comment", {}).get("comments", []):
             comments.append({
@@ -77,8 +72,7 @@ class JiraClient:
                 "created": c.get("created"),
                 "updated": c.get("updated"),
             })
-        
-        # Extract subtasks
+
         subtasks = []
         for st in fields.get("subtasks", []):
             subtasks.append({
@@ -86,14 +80,10 @@ class JiraClient:
                 "summary": st.get("fields", {}).get("summary"),
                 "status": st.get("fields", {}).get("status", {}).get("name"),
             })
-        
-        # Extract fix versions
+
         fix_versions = [v.get("name") for v in fields.get("fixVersions", [])]
-        
-        # Extract labels
         labels = fields.get("labels", [])
-        
-        # Extract links
+
         links = []
         for link in fields.get("issuelinks", []):
             link_type = link.get("type", {}).get("name", "")
@@ -291,9 +281,20 @@ class JiraClient:
         summary: str,
         description: str = "",
         epic_link: str | None = None,
+        epic_name: str | None = None,
         fix_version: str | None = None,
     ) -> dict[str, Any] | None:
-        """Create a new Jira issue."""
+        """Create a new Jira issue.
+        
+        Args:
+            project: Project key (e.g., "O365")
+            issue_type: Issue type name (e.g., "Task", "Epic", "Bug")
+            summary: Issue summary/title
+            description: Issue description
+            epic_link: Epic key to link this issue to (customfield_10617)
+            epic_name: Epic Name field - required when creating Epics (customfield_10620)
+            fix_version: Fix version name
+        """
         client = await self._get_client()
 
         fields = {
@@ -304,7 +305,10 @@ class JiraClient:
         }
 
         if epic_link:
-            fields["customfield_12340"] = epic_link
+            fields["customfield_10617"] = epic_link
+
+        if issue_type.lower() == "epic":
+            fields["customfield_10620"] = epic_name or summary
 
         if fix_version:
             fields["fixVersions"] = [{"name": fix_version}]
@@ -349,6 +353,11 @@ class JiraClient:
         """Get all subtasks for a parent issue."""
         jql = f'parent = {parent_key} ORDER BY key ASC'
         return await self.search_issues(jql, max_results=100)
+
+    async def get_issues_in_epic(self, epic_key: str, max_results: int = 100) -> list[dict[str, Any]]:
+        """Get all issues linked to an epic via Epic Link."""
+        jql = f'"Epic Link" = {epic_key} ORDER BY key ASC'
+        return await self.search_issues(jql, max_results)
 
     async def update_issue(
         self,

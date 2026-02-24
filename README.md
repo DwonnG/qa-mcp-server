@@ -125,6 +125,7 @@ This file contains organization-specific settings:
 | `REPO_LAMBDA_MAP` | Maps repos to Lambda function names |
 | `JENKINS_JOBS` | Jenkins job paths |
 | `JQL_TEMPLATES` | JQL query templates |
+| `RELEASE_TESTING` | Template Epic key for release testing cloning |
 
 See `config_example.py` for a template with documentation.
 
@@ -157,6 +158,7 @@ See `config_example.py` for a template with documentation.
 - `qa_summarize_comments` - Summarize ticket comments
 - `qa_analyze_story` - Analyze story for QA readiness
 - `qa_analyze_epic` - Analyze epic for release readiness
+- `qa_clone_release_epic` - Clone release testing template Epic and tasks for a new version
 
 ### GitHub Tools
 - `qa_get_pr_info` - Get PR details
@@ -201,6 +203,9 @@ AI: PR #456 merged 2 hours ago. Lambda last modified 1 hour ago. Deployed!
 
 You: "Mark PROJ-12345 as passed - verified login flow works correctly"
 AI: Resolved as passed with QA comment added.
+
+You: "Clone the release testing template for version 3.3.0"
+AI: Created new Epic O365-50500 "Release 3.3.0 Testing" with 8 test tasks cloned.
 ```
 
 ## Project Structure

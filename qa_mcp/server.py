@@ -9,36 +9,43 @@ from typing import Any
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-# Add parent directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from qa_mcp.clients import AWSClient, GitHubClient, JenkinsClient, JiraClient, WebexClient
 
-# Try to import config - use defaults if not present
 try:
-    from config import JQL_TEMPLATES, QA_COMMENT_TEMPLATES
+    from config import JQL_TEMPLATES, QA_COMMENT_TEMPLATES, RELEASE_TESTING
 except ImportError:
     JQL_TEMPLATES = {
-        "ready_for_qa": "project = {project} AND status = 'Ready for QA' ORDER BY priority DESC",
-        "in_progress": "project = {project} AND status = 'In Progress' ORDER BY updated DESC",
+        "ready_for_qa": (
+            'project = {project} AND type in (Story, Bug, Improvement, Task, Vulnerability) '
+            'AND status in (QA, "Beta QA") AND "Team(s)" in ({team}) '
+            "AND Sprint in openSprints() AND Validator is EMPTY "
+            "ORDER BY fixVersion ASC"
+        ),
+        "in_progress": (
+            'project = {project} AND type in (Story, Bug, Improvement, Task, Vulnerability) '
+            'AND status in ("In Progress", "PR Pending Review") '
+            "ORDER BY updated DESC"
+        ),
     }
     QA_COMMENT_TEMPLATES = {
         "pass": "h3. QA Validation - PASS\n\n*Environment:* {environment}\n\n*Verification:*\n{verification_steps}\n\n*Test Result:* PASS - {summary}",
         "pass_vulnerability": "h3. QA Validation - PASS\n\n*Environment:* {environment}\n\nVerified via PR #{pr_number}",
         "fail": "h3. QA Validation - FAIL\n\n*Environment:* {environment}\n\n*Issue:* {issue_description}\n\n*Steps:*\n{steps}\n\n*Expected:* {expected}\n*Actual:* {actual}",
     }
+    RELEASE_TESTING = {
+        "template_epic": "O365-49840",
+        "summary_format": "Release {version} Testing",
+    }
 
-# Load environment variables
 load_dotenv()
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize MCP server
 mcp = FastMCP("qa-automation")
 
-# Initialize clients (lazy initialization)
 _jira: JiraClient | None = None
 _aws: AWSClient | None = None
 _jenkins: JenkinsClient | None = None
@@ -46,8 +53,6 @@ _github: GitHubClient | None = None
 _webex: WebexClient | None = None
 _ai_client: Any = None
 _secret_manager: Any = None
-
-# Handler instances (lazy initialization)
 _handlers: dict | None = None
 
 
@@ -136,15 +141,10 @@ def get_handlers() -> dict | None:
         return None
 
 
-# ============================================================================
-# JIRA TOOLS
-# ============================================================================
-
-
 @mcp.tool()
 async def qa_find_ready_tickets(
     project: str,
-    team: str = "",
+    team: str = "Raven",
     max_results: int = 20,
 ) -> dict[str, Any]:
     """Find Jira tickets waiting in the QA queue ready to be tested."""
@@ -303,9 +303,88 @@ async def qa_update_issue(
         return {"status": "error", "error": str(e)}
 
 
-# ============================================================================
-# AI-POWERED ANALYSIS TOOLS
-# ============================================================================
+@mcp.tool()
+async def qa_clone_release_epic(
+    version: str,
+    template_epic: str = "",
+) -> dict[str, Any]:
+    """Clone the release testing template Epic and all linked tasks for a new version.
+    
+    Args:
+        version: Release version (e.g., "3.3.0")
+        template_epic: Source template Epic key (uses config default if not provided)
+    
+    Returns:
+        New Epic key and list of cloned task keys
+    """
+    # Use config default if not provided
+    if not template_epic:
+        template_epic = RELEASE_TESTING.get("template_epic", "O365-49840")
+    
+    jira = get_jira()
+    try:
+        template = await jira.get_issue(template_epic)
+        if not template:
+            return {"status": "error", "error": f"Template Epic {template_epic} not found"}
+
+        project_key = template["fields"]["project"]["key"]
+        template_description = template["fields"].get("description", "")
+
+        summary_format = RELEASE_TESTING.get("summary_format", "Release {version} Testing")
+        new_epic_summary = summary_format.format(version=version)
+        new_epic = await jira.create_issue(
+            project=project_key,
+            issue_type="Epic",
+            summary=new_epic_summary,
+            description=template_description,
+        )
+
+        if not new_epic:
+            return {"status": "error", "error": "Failed to create new Epic"}
+
+        new_epic_key = new_epic["key"]
+        template_tasks = await jira.get_issues_in_epic(template_epic)
+
+        cloned_tasks = []
+        for task in template_tasks:
+            original_key = task["key"]
+            original_summary = task["fields"]["summary"]
+            original_description = task["fields"].get("description", "")
+            original_type = task["fields"]["issuetype"]["name"]
+
+            new_summary = original_summary.replace("[TEMPLATE]", version)
+            cloned_task = await jira.create_issue(
+                project=project_key,
+                issue_type=original_type,
+                summary=new_summary,
+                description=original_description,
+                epic_link=new_epic_key,
+            )
+            
+            if cloned_task:
+                cloned_tasks.append({
+                    "original": original_key,
+                    "new": cloned_task["key"],
+                    "summary": new_summary,
+                })
+            else:
+                cloned_tasks.append({
+                    "original": original_key,
+                    "new": None,
+                    "error": "Failed to clone",
+                })
+        
+        return {
+            "status": "success",
+            "new_epic": new_epic_key,
+            "new_epic_summary": new_epic_summary,
+            "cloned_tasks": cloned_tasks,
+            "total_cloned": len([t for t in cloned_tasks if t.get("new")]),
+            "total_failed": len([t for t in cloned_tasks if not t.get("new")]),
+        }
+        
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @mcp.tool()
@@ -455,11 +534,6 @@ async def qa_analyze_epic(epic_key: str, primary_team: str = "") -> dict[str, An
     return {"status": "success", "epic_key": epic_key, "analysis": result}
 
 
-# ============================================================================
-# DEPLOYMENT VERIFICATION TOOLS
-# ============================================================================
-
-
 @mcp.tool()
 async def qa_check_deployment(repo: str, environment: str) -> dict[str, Any]:
     """Check if code is deployed to an environment."""
@@ -518,11 +592,6 @@ async def qa_compare_environments(repo: str, env1_name: str, env2_name: str) -> 
     return comparison
 
 
-# ============================================================================
-# JENKINS TOOLS
-# ============================================================================
-
-
 @mcp.tool()
 async def qa_check_e2e_tests(repo: str) -> dict[str, Any]:
     """Check end-to-end test results from Jenkins."""
@@ -559,8 +628,19 @@ async def qa_trigger_e2e_tests(
     pr_number: int = 0,
     environment: str = "",
     execution_mode: str = "",
+    test_tag: str = "",
 ) -> dict[str, Any]:
-    """Trigger E2E tests for a repository with a custom branch or PR."""
+    """Trigger E2E tests for a repository with a custom branch or PR.
+    
+    Args:
+        repo: Repository name (python-raptor, directory-data, go-raptor)
+        branch: Branch name to test (defaults to main)
+        pr_number: PR number - will auto-detect branch from PR
+        environment: Target environment (integration, qa, beta)
+        execution_mode: How to run tests (regression, smoke, test_tag)
+        test_tag: Pytest marker to run when execution_mode is 'test_tag'
+                  Examples: bulk, inline, smoke, provisioning
+    """
     if pr_number > 0:
         github = get_github()
         pr_info = await github.get_pr(os.getenv("GITHUB_ORG", ""), repo, pr_number)
@@ -574,15 +654,40 @@ async def qa_trigger_e2e_tests(
         branch = "main"
 
     jenkins = get_jenkins()
-    result = await jenkins.trigger_e2e_test(repo, branch, environment, execution_mode)
+    result = await jenkins.trigger_e2e_test(
+        repo=repo,
+        branch=branch,
+        environment=environment,
+        execution_mode=execution_mode,
+        test_tag=test_tag,
+        pr_number=pr_number,
+    )
     if pr_number > 0:
         result["pr_number"] = pr_number
     return result
 
 
-# ============================================================================
-# GITHUB TOOLS
-# ============================================================================
+@mcp.tool()
+async def qa_get_build_console(
+    repo: str,
+    build_number: int,
+    job_type: str = "e2e",
+    tail_lines: int = 200,
+) -> dict[str, Any]:
+    """Get console output from a specific Jenkins build (last N lines)."""
+    jenkins = get_jenkins()
+    return await jenkins.get_build_console(repo, build_number, job_type, tail_lines)
+
+
+@mcp.tool()
+async def qa_get_build_failures(
+    repo: str,
+    build_number: int,
+    job_type: str = "e2e",
+) -> dict[str, Any]:
+    """Get test report from a Jenkins build showing failed tests."""
+    jenkins = get_jenkins()
+    return await jenkins.get_build_test_report(repo, build_number, job_type)
 
 
 @mcp.tool()
@@ -687,11 +792,6 @@ async def qa_get_ticket_context(issue_key: str, owner: str = "") -> dict[str, An
         context["readiness"] = "No PR found"
 
     return context
-
-
-# ============================================================================
-# WEBEX TOOLS
-# ============================================================================
 
 
 @mcp.tool()
@@ -831,11 +931,6 @@ async def webex_whoami() -> dict[str, Any]:
     """Get info about the authenticated Webex bot/user."""
     webex = get_webex()
     return await webex.get_my_info()
-
-
-# ============================================================================
-# MAIN
-# ============================================================================
 
 
 if __name__ == "__main__":

@@ -81,3 +81,24 @@ class TestJiraClient:
 
             assert len(results) == 1
             assert results[0]["key"] == "TEST-123"
+
+    @pytest.mark.asyncio
+    async def test_get_issues_in_epic(self, mock_jira_response: dict, mock_httpx_client: AsyncMock) -> None:
+        """Test getting issues linked to an epic."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"issues": [mock_jira_response]}
+        mock_response.raise_for_status = MagicMock()
+        mock_httpx_client.post.return_value = mock_response
+
+        with patch.dict("os.environ", {"JIRA_URL": "https://jira.example.com", "JIRA_PERSONAL_TOKEN": "token"}):
+            client = JiraClient()
+            client._client = mock_httpx_client
+
+            results = await client.get_issues_in_epic("EPIC-100")
+
+            assert len(results) == 1
+            assert results[0]["key"] == "TEST-123"
+            mock_httpx_client.post.assert_called_once()
+            call_args = mock_httpx_client.post.call_args
+            assert call_args[0][0] == "/search"
+            assert '"Epic Link" = EPIC-100' in call_args[1]["json"]["jql"]
