@@ -142,7 +142,7 @@ def get_handlers() -> dict | None:
 
 
 @mcp.tool()
-async def qa_find_ready_tickets(
+async def qa_get_qa_queue(
     project: str,
     team: str = "Raven",
     max_results: int = 20,
@@ -235,8 +235,7 @@ async def qa_fail_ticket(
         actual=actual,
     )
     jira = get_jira()
-    return await jira.fail_and_reopen(issue_key, comment)
-
+    return await jira.fail_and_reopen(issue_key, comment) 
 
 @mcp.tool()
 async def qa_add_comment(issue_key: str, comment: str) -> dict[str, Any]:

@@ -160,6 +160,7 @@ See `config_example.py` for a template with documentation.
 ## Available Tools
 
 ### Jira Tools
+- `qa_get_qa_queue` - Find tickets waiting in the QA queue ready to be tested
 - `qa_find_in_progress` - Find tickets developers are working on
 - `qa_claim_ticket` - Claim a ticket for QA validation
 - `qa_resolve_pass` - Mark ticket as QA passed
@@ -199,6 +200,10 @@ See `config_example.py` for a template with documentation.
 ### Workflow Tools
 - `qa_get_ticket_context` - Full context (Jira + PRs + deployment)
 - `qa_verify_and_resolve_vulnerability` - One-click vuln verification
+
+## 1-minute demo
+
+See **[DEMO_1_MINUTE.md](DEMO_1_MINUTE.md)** for a scripted 1-minute demo: find ready tickets → get details → AI test cases (optional: claim ticket).
 
 ## Example Usage
 
