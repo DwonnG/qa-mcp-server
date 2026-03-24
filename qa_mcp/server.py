@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """QA MCP Server - Automate QA workflows for development teams."""
 
+import json as json_module
 import logging
 import os
+import re
 import sys
+from datetime import datetime, timezone
 from typing import Any
 
 from dotenv import load_dotenv
@@ -11,11 +14,12 @@ from fastmcp import FastMCP
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from qa_mcp.clients import AWSClient, GitHubClient, JenkinsClient, JiraClient, WebexClient
+from qa_mcp.clients import AWSClient, BrowserClient, GitHubClient, JenkinsClient, JiraClient, WebexClient
 
 try:
-    from config import JQL_TEMPLATES, QA_COMMENT_TEMPLATES, RELEASE_TESTING
+    from config import JENKINS_JOBS, JQL_TEMPLATES, QA_COMMENT_TEMPLATES, RELEASE_TESTING
 except ImportError:
+    JENKINS_JOBS = {}
     JQL_TEMPLATES = {
         "ready_for_qa": (
             'project = {project} AND type in (Story, Bug, Improvement, Task, Vulnerability) '
@@ -31,7 +35,6 @@ except ImportError:
     }
     QA_COMMENT_TEMPLATES = {
         "pass": "h3. QA Validation - PASS\n\n*Environment:* {environment}\n\n*Verification:*\n{verification_steps}\n\n*Test Result:* PASS - {summary}",
-        "pass_vulnerability": "h3. QA Validation - PASS\n\n*Environment:* {environment}\n\nVerified via PR #{pr_number}",
         "fail": "h3. QA Validation - FAIL\n\n*Environment:* {environment}\n\n*Issue:* {issue_description}\n\n*Steps:*\n{steps}\n\n*Expected:* {expected}\n*Actual:* {actual}",
     }
     RELEASE_TESTING = {
@@ -51,6 +54,7 @@ _aws: AWSClient | None = None
 _jenkins: JenkinsClient | None = None
 _github: GitHubClient | None = None
 _webex: WebexClient | None = None
+_browser: BrowserClient | None = None
 _ai_client: Any = None
 _secret_manager: Any = None
 _handlers: dict | None = None
@@ -89,6 +93,13 @@ def get_webex() -> WebexClient:
     if _webex is None:
         _webex = WebexClient()
     return _webex
+
+
+def get_browser() -> BrowserClient:
+    global _browser
+    if _browser is None:
+        _browser = BrowserClient()
+    return _browser
 
 
 def get_ai_client() -> Any:
@@ -791,6 +802,637 @@ async def qa_get_ticket_context(issue_key: str, owner: str = "") -> dict[str, An
         context["readiness"] = "No PR found"
 
     return context
+
+
+@mcp.tool()
+async def qa_verify_vulnerability_resolved(
+    issue_key: str,
+    repo: str = "",
+    environment: str = "integration",
+    auto_resolve: bool = True,
+) -> dict[str, Any]:
+    """Verify a vulnerability fix: find PR, check merge/deployment/tests, then resolve.
+    
+    Repo is auto-detected from the ticket if not provided.
+    Set auto_resolve=False to dry-run without resolving.
+    """
+    jira = get_jira()
+    github = get_github()
+    aws = get_aws()
+    jenkins = get_jenkins()
+    owner = os.getenv("GITHUB_ORG", "raptor")
+
+    result = {
+        "status": "in_progress",
+        "issue_key": issue_key,
+        "environment": environment,
+        "checks": {},
+    }
+
+    try:
+        issue = await jira.get_issue(issue_key)
+        if not issue:
+            return {"status": "error", "error": f"Issue {issue_key} not found"}
+
+        description = issue["fields"].get("description", "")
+
+        if not repo:
+            try:
+                desc_json = json_module.loads(description)
+                repo = desc_json.get("Repo_Name", "")
+            except (json_module.JSONDecodeError, TypeError):
+                pass
+
+            if not repo:
+                known_repos = (
+                    "directory-data", "python-raptor", "go-raptor", "raptor-ui",
+                    "raptor-engine", "policy-enforcement", "terraform",
+                    "reporting", "jenkins-library",
+                )
+                for part in issue["fields"].get("summary", "").split(":"):
+                    if part.strip() in known_repos:
+                        repo = part.strip()
+                        break
+
+            if not repo:
+                return {"status": "error", "error": "Could not detect repo. Provide it explicitly."}
+
+        result["checks"]["ticket"] = {
+            "summary": issue["fields"]["summary"],
+            "repo_detected": repo,
+        }
+    except Exception as e:
+        return {"status": "error", "error": f"Error fetching ticket: {e}"}
+
+    result["repo"] = repo
+
+    try:
+        prs = await github.search_prs(owner, repo, issue_key)
+        if not prs:
+            return {**result, "status": "error", "error": f"No PR found for {issue_key} in {repo}"}
+
+        pr = prs[0]
+        pr_number = pr.get("number")
+        merged_at_str = pr.get("merged_at")
+
+        pr_detail = await github.get_pr(owner, repo, pr_number)
+        merge_commit_sha = pr_detail.get("merge_commit_sha") if pr_detail.get("status") == "success" else None
+        if not merged_at_str and pr_detail.get("status") == "success":
+            merged_at_str = pr_detail.get("merged_at")
+
+        merged_at = None
+        if merged_at_str:
+            merged_at = datetime.fromisoformat(merged_at_str.replace("Z", "+00:00"))
+
+        result["checks"]["pr"] = {
+            "number": pr_number,
+            "title": pr.get("title"),
+            "merged": pr.get("merged", False),
+            "merged_at": merged_at_str,
+            "merge_commit_sha": merge_commit_sha,
+        }
+    except Exception as e:
+        return {**result, "status": "error", "error": f"Error finding PR: {e}"}
+
+    if not pr.get("merged"):
+        return {**result, "status": "blocked", "error": f"PR #{pr_number} is not merged yet"}
+
+    try:
+        deploy_result = aws.check_deployment(repo, environment)
+        deployed_after_merge = False
+        latest_deploy = None
+
+        if deploy_result.get("status") == "success" and merged_at:
+            for func in deploy_result.get("functions", []):
+                if func.get("status") == "success" and func.get("last_modified"):
+                    func_time = datetime.fromisoformat(func["last_modified"].replace("Z", "+00:00"))
+                    if latest_deploy is None or func_time > latest_deploy:
+                        latest_deploy = func_time
+            deployed_after_merge = latest_deploy is not None and latest_deploy > merged_at
+
+        result["checks"]["deployment"] = {
+            "status": deploy_result.get("status"),
+            "functions_count": len(deploy_result.get("functions", [])),
+            "latest_deploy": latest_deploy.isoformat() if latest_deploy else None,
+            "deployed_after_merge": deployed_after_merge,
+        }
+
+        if deploy_result.get("status") != "success":
+            return {**result, "status": "blocked", "error": f"Deployment check failed for {repo} in {environment}"}
+    except Exception as e:
+        result["checks"]["deployment"] = {"status": "error", "error": str(e)}
+
+    try:
+        test_result = await jenkins.check_e2e_tests(repo)
+        build_timestamp = test_result.get("timestamp")
+        tests_ran_after_merge = False
+        if build_timestamp and merged_at:
+            build_time = datetime.fromtimestamp(build_timestamp / 1000, tz=timezone.utc)
+            tests_ran_after_merge = build_time > merged_at
+
+        causes = test_result.get("causes", [])
+        upstream = None
+        for cause in causes:
+            if cause.get("upstream_project"):
+                upstream = {
+                    "project": cause["upstream_project"],
+                    "build": cause.get("upstream_build"),
+                    "description": cause.get("description"),
+                }
+                break
+
+        result["checks"]["e2e_tests"] = {
+            "status": test_result.get("status"),
+            "build_number": test_result.get("build_number"),
+            "build_result": test_result.get("result"),
+            "build_url": test_result.get("url"),
+            "tests_ran_after_merge": tests_ran_after_merge,
+            "triggered_by": upstream or (causes[0]["description"] if causes else "unknown"),
+        }
+
+        if test_result.get("result") not in ("SUCCESS", None):
+            result["status"] = "warning"
+            result["warning"] = f"E2E tests result: {test_result.get('result')}"
+    except Exception as e:
+        result["checks"]["e2e_tests"] = {"status": "error", "error": str(e)}
+
+    checks = result["checks"]
+    e2e = checks.get("e2e_tests", {})
+    deploy = checks.get("deployment", {})
+    pr_checks = checks.get("pr", {})
+    ticket_info = checks.get("ticket", {})
+
+    job_path = JENKINS_JOBS.get(repo, {}).get("e2e", "")
+    job_name = job_path.split("/job/")[-1] if job_path else repo
+
+    vuln_summary = ticket_info.get("summary", issue_key)
+    try:
+        desc_data = json_module.loads(description) if description else {}
+        vuln_line = f"- {desc_data.get('Vulnerable_Package', 'N/A')} ({desc_data.get('Severity', 'N/A')}): {desc_data.get('Advisory_ID', 'N/A')}"
+    except Exception:
+        vuln_line = f"- {vuln_summary}"
+
+    commit_sha = (pr_checks.get("merge_commit_sha") or "N/A")[:8]
+
+    if auto_resolve:
+        try:
+            comment = (
+                "h3. QA Validation - PASS (Vulnerability)\n\n"
+                f"*Environment:* {environment}\n\n"
+                "h4. Verification Chain\n"
+                "||Step||Detail||\n"
+                f"|PR|#{pr_number} (merged {pr_checks.get('merged_at', 'N/A')})|\n"
+                f"|Commit|{{{{{commit_sha}}}}}|\n"
+                f"|Deployment|Last deploy: {deploy.get('latest_deploy', 'N/A')}|\n"
+                f"|E2E Tests|Build #{e2e.get('build_number', 'N/A')} — {job_name}|\n\n"
+                "h4. Vulnerabilities Addressed\n"
+                f"{vuln_line}\n"
+            )
+            resolve_result = await jira.resolve_pass(issue_key, comment)
+            result["status"] = "success"
+            result["resolution"] = resolve_result
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = f"Failed to resolve ticket: {e}"
+    else:
+        result["status"] = "verified"
+        result["message"] = "All checks passed. Set auto_resolve=True to resolve."
+
+    return result
+
+
+@mcp.tool()
+async def qa_verify_version_bump(
+    issue_key: str,
+    repos: list[str] | None = None,
+    environment: str = "integration",
+    auto_resolve: bool = True,
+) -> dict[str, Any]:
+    """Verify a version bump release: check each repo's PR, deployment, and E2E tests.
+
+    Repos are auto-detected from the ticket summary if not provided.
+    Terraform-managed repos (python-raptor, policy-enforcement) are verified
+    via terraform PRs. Service repos (directory-data, etc.) are verified via
+    their own PR, Lambda deployment, and E2E tests.
+    Set auto_resolve=False to dry-run without resolving.
+    """
+    TERRAFORM_MANAGED = {
+        "python-raptor": "python_raptor_version",
+    }
+
+    jira = get_jira()
+    github = get_github()
+    aws = get_aws()
+    jenkins = get_jenkins()
+    owner = os.getenv("GITHUB_ORG", "raptor")
+
+    result: dict[str, Any] = {
+        "status": "in_progress",
+        "issue_key": issue_key,
+        "environment": environment,
+        "repos": {},
+    }
+
+    try:
+        issue = await jira.get_issue(issue_key)
+        if not issue:
+            return {"status": "error", "error": f"Issue {issue_key} not found"}
+    except Exception as e:
+        return {"status": "error", "error": f"Error fetching ticket: {e}"}
+
+    summary = issue["fields"].get("summary", "")
+    version = ""
+    for part in summary.split():
+        if part.startswith("v") and "." in part:
+            version = part.strip(" -:")
+            break
+
+    result["version"] = version
+    result["summary"] = summary
+
+    if not repos:
+        known_repos = {
+            "python-raptor": ("python-raptor", "python_raptor", "pythonraptor", "policydb", "policy db", "reporting"),
+            "directory-data": ("directory-data", "directory data", "data layer"),
+            "go-raptor": ("go-raptor", "go_raptor"),
+            "raptor-ui": ("raptor-ui", "raptor ui"),
+            "raptor-docs": ("raptor-docs", "raptor docs", "raptor_docs", "raptordocs")
+        }
+        summary_lower = summary.lower()
+        description_lower = (issue["fields"].get("description") or "").lower()
+        search_text = f"{summary_lower} {description_lower}"
+
+        repos = []
+        for repo_name, aliases in known_repos.items():
+            if any(alias in search_text for alias in aliases):
+                repos.append(repo_name)
+
+        if not repos:
+            return {"status": "error", "error": "Could not detect repos from ticket. Provide them explicitly."}
+
+    result["detected_repos"] = repos
+    all_passed = True
+    has_warnings = False
+    repo_comment_sections = []
+
+    terraform_repos = [r for r in repos if r in TERRAFORM_MANAGED]
+    service_repos = [r for r in repos if r not in TERRAFORM_MANAGED]
+
+    if terraform_repos:
+        tf_result: dict[str, Any] = {"repo": "terraform", "checks": {}, "managed_repos": terraform_repos}
+
+        try:
+            prs = await github.search_prs(owner, "terraform", issue_key)
+            if not prs:
+                tf_result["checks"]["pr"] = {"status": "not_found"}
+                tf_result["status"] = "warning"
+                has_warnings = True
+            else:
+                pr = prs[0]
+                pr_number = pr.get("number")
+                merged_at_str = pr.get("merged_at")
+
+                pr_detail = await github.get_pr(owner, "terraform", pr_number)
+                merge_commit_sha = pr_detail.get("merge_commit_sha") if pr_detail.get("status") == "success" else None
+                if not merged_at_str and pr_detail.get("status") == "success":
+                    merged_at_str = pr_detail.get("merged_at")
+
+                tf_result["checks"]["pr"] = {
+                    "number": pr_number,
+                    "title": pr.get("title"),
+                    "merged": pr.get("merged", False),
+                    "merged_at": merged_at_str,
+                    "merge_commit_sha": merge_commit_sha,
+                }
+
+                if pr.get("merged"):
+                    tf_result["status"] = "passed"
+                    version_vars = [TERRAFORM_MANAGED[r] for r in terraform_repos]
+                    tf_result["checks"]["version_variables"] = version_vars
+                else:
+                    tf_result["status"] = "blocked"
+                    all_passed = False
+        except Exception as e:
+            tf_result["checks"]["pr"] = {"status": "error", "error": str(e)}
+            tf_result["status"] = "error"
+            all_passed = False
+
+        result["repos"]["terraform"] = tf_result
+
+        tf_merged_at = None
+        tf_merged_at_str = tf_result["checks"].get("pr", {}).get("merged_at")
+        if tf_merged_at_str:
+            tf_merged_at = datetime.fromisoformat(tf_merged_at_str.replace("Z", "+00:00"))
+
+        for managed_repo in terraform_repos:
+            managed_result: dict[str, Any] = {
+                "repo": managed_repo,
+                "verified_via": "terraform",
+                "version_variable": TERRAFORM_MANAGED[managed_repo],
+                "status": tf_result.get("status", "error"),
+                "checks": {},
+            }
+
+            if tf_result.get("status") == "passed":
+                try:
+                    test_result = await jenkins.check_e2e_tests(managed_repo)
+                    build_timestamp = test_result.get("timestamp")
+                    tests_ran_after_merge = False
+                    if build_timestamp and tf_merged_at:
+                        build_time = datetime.fromtimestamp(build_timestamp / 1000, tz=timezone.utc)
+                        tests_ran_after_merge = build_time > tf_merged_at
+
+                    causes = test_result.get("causes", [])
+                    upstream = None
+                    for cause in causes:
+                        if cause.get("upstream_project"):
+                            upstream = {
+                                "project": cause["upstream_project"],
+                                "build": cause.get("upstream_build"),
+                                "description": cause.get("description"),
+                            }
+                            break
+
+                    managed_result["checks"]["e2e_tests"] = {
+                        "status": test_result.get("status"),
+                        "build_number": test_result.get("build_number"),
+                        "build_result": test_result.get("result"),
+                        "build_url": test_result.get("url"),
+                        "tests_ran_after_merge": tests_ran_after_merge,
+                        "triggered_by": upstream or (causes[0]["description"] if causes else "unknown"),
+                    }
+
+                    if test_result.get("result") not in ("SUCCESS", None):
+                        managed_result["status"] = "warning"
+                        has_warnings = True
+                except Exception as e:
+                    managed_result["checks"]["e2e_tests"] = {"status": "error", "error": str(e)}
+
+            result["repos"][managed_repo] = managed_result
+
+        pr_info = tf_result["checks"].get("pr", {})
+        managed_names = ", ".join(terraform_repos)
+        version_vars = ", ".join(TERRAFORM_MANAGED[r] for r in terraform_repos)
+        section = (
+            f"h4. Terraform (manages {managed_names})\n"
+            f"||Step||Detail||\n"
+            f"|PR|#{pr_info.get('number', 'N/A')} (merged {pr_info.get('merged_at', 'N/A')})|\n"
+            f"|Commit|{{{{{(pr_info.get('merge_commit_sha') or 'N/A')[:8]}}}}}|\n"
+            f"|Version Vars|{version_vars}|\n"
+        )
+        repo_comment_sections.append(section)
+
+        for managed_repo in terraform_repos:
+            e2e_info = result["repos"][managed_repo].get("checks", {}).get("e2e_tests", {})
+            job_path = JENKINS_JOBS.get(managed_repo, {}).get("e2e", "")
+            job_name = job_path.split("/job/")[-1] if job_path else managed_repo
+            section = (
+                f"h4. {managed_repo} (E2E)\n"
+                f"||Step||Detail||\n"
+                f"|E2E Tests|Build #{e2e_info.get('build_number', 'N/A')} — {job_name} — {e2e_info.get('build_result', 'N/A')}|\n"
+                f"|Ran After TF Merge|{e2e_info.get('tests_ran_after_merge', 'N/A')}|\n"
+            )
+            repo_comment_sections.append(section)
+
+    for repo in service_repos:
+        repo_result: dict[str, Any] = {"repo": repo, "checks": {}}
+
+        try:
+            prs = await github.search_prs(owner, repo, issue_key)
+            if not prs:
+                repo_result["checks"]["pr"] = {"status": "not_found"}
+                repo_result["status"] = "warning"
+                has_warnings = True
+                result["repos"][repo] = repo_result
+                continue
+
+            pr = prs[0]
+            pr_number = pr.get("number")
+            merged_at_str = pr.get("merged_at")
+
+            pr_detail = await github.get_pr(owner, repo, pr_number)
+            merge_commit_sha = pr_detail.get("merge_commit_sha") if pr_detail.get("status") == "success" else None
+            if not merged_at_str and pr_detail.get("status") == "success":
+                merged_at_str = pr_detail.get("merged_at")
+
+            merged_at = None
+            if merged_at_str:
+                merged_at = datetime.fromisoformat(merged_at_str.replace("Z", "+00:00"))
+
+            repo_result["checks"]["pr"] = {
+                "number": pr_number,
+                "title": pr.get("title"),
+                "merged": pr.get("merged", False),
+                "merged_at": merged_at_str,
+                "merge_commit_sha": merge_commit_sha,
+            }
+
+            if not pr.get("merged"):
+                repo_result["status"] = "blocked"
+                all_passed = False
+                result["repos"][repo] = repo_result
+                continue
+        except Exception as e:
+            repo_result["checks"]["pr"] = {"status": "error", "error": str(e)}
+            all_passed = False
+            result["repos"][repo] = repo_result
+            continue
+
+        try:
+            deploy_result = aws.check_deployment(repo, environment)
+            deployed_after_merge = False
+            latest_deploy = None
+
+            if deploy_result.get("status") == "success" and merged_at:
+                for func in deploy_result.get("functions", []):
+                    if func.get("status") == "success" and func.get("last_modified"):
+                        func_time = datetime.fromisoformat(func["last_modified"].replace("Z", "+00:00"))
+                        if latest_deploy is None or func_time > latest_deploy:
+                            latest_deploy = func_time
+                deployed_after_merge = latest_deploy is not None and latest_deploy > merged_at
+
+            repo_result["checks"]["deployment"] = {
+                "status": deploy_result.get("status"),
+                "functions_count": len(deploy_result.get("functions", [])),
+                "latest_deploy": latest_deploy.isoformat() if latest_deploy else None,
+                "deployed_after_merge": deployed_after_merge,
+            }
+
+            if deploy_result.get("status") != "success":
+                repo_result["status"] = "blocked"
+                all_passed = False
+        except Exception as e:
+            repo_result["checks"]["deployment"] = {"status": "error", "error": str(e)}
+
+        try:
+            test_result = await jenkins.check_e2e_tests(repo)
+            build_timestamp = test_result.get("timestamp")
+            tests_ran_after_merge = False
+            if build_timestamp and merged_at:
+                build_time = datetime.fromtimestamp(build_timestamp / 1000, tz=timezone.utc)
+                tests_ran_after_merge = build_time > merged_at
+
+            causes = test_result.get("causes", [])
+            upstream = None
+            for cause in causes:
+                if cause.get("upstream_project"):
+                    upstream = {
+                        "project": cause["upstream_project"],
+                        "build": cause.get("upstream_build"),
+                        "description": cause.get("description"),
+                    }
+                    break
+
+            repo_result["checks"]["e2e_tests"] = {
+                "status": test_result.get("status"),
+                "build_number": test_result.get("build_number"),
+                "build_result": test_result.get("result"),
+                "build_url": test_result.get("url"),
+                "tests_ran_after_merge": tests_ran_after_merge,
+                "triggered_by": upstream or (causes[0]["description"] if causes else "unknown"),
+            }
+
+            if test_result.get("result") not in ("SUCCESS", None):
+                repo_result["status"] = "warning"
+                has_warnings = True
+        except Exception as e:
+            repo_result["checks"]["e2e_tests"] = {"status": "error", "error": str(e)}
+
+        if "status" not in repo_result:
+            repo_result["status"] = "passed"
+
+        result["repos"][repo] = repo_result
+
+        pr_info = repo_result["checks"].get("pr", {})
+        deploy_info = repo_result["checks"].get("deployment", {})
+        e2e_info = repo_result["checks"].get("e2e_tests", {})
+        job_path = JENKINS_JOBS.get(repo, {}).get("e2e", "")
+        job_name = job_path.split("/job/")[-1] if job_path else repo
+
+        section = (
+            f"h4. {repo}\n"
+            f"||Step||Detail||\n"
+            f"|PR|#{pr_info.get('number', 'N/A')} (merged {pr_info.get('merged_at', 'N/A')})|\n"
+            f"|Commit|{{{{{(pr_info.get('merge_commit_sha') or 'N/A')[:8]}}}}}|\n"
+            f"|Deployment|{deploy_info.get('functions_count', 0)} functions, last deploy: {deploy_info.get('latest_deploy', 'N/A')}|\n"
+            f"|E2E Tests|Build #{e2e_info.get('build_number', 'N/A')} — {job_name} — {e2e_info.get('build_result', 'N/A')}|\n"
+        )
+        repo_comment_sections.append(section)
+
+    if all_passed and not has_warnings:
+        result["status"] = "verified" if not auto_resolve else "in_progress"
+    elif has_warnings:
+        result["status"] = "warning"
+    else:
+        result["status"] = "blocked"
+
+    if auto_resolve and all_passed:
+        try:
+            comment = (
+                "h3. QA Validation - PASS (Version Bump)\n\n"
+                f"*Version:* {version or issue_key}\n"
+                f"*Environment:* {environment}\n\n"
+                + "\n".join(repo_comment_sections)
+            )
+            resolve_result = await jira.resolve_pass(issue_key, comment)
+            result["status"] = "success"
+            result["resolution"] = resolve_result
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = f"Failed to resolve ticket: {e}"
+    elif not auto_resolve and all_passed:
+        result["status"] = "verified"
+        result["message"] = "All checks passed. Set auto_resolve=True to resolve."
+
+    return result
+
+
+@mcp.tool()
+async def qa_verify_ui_version(
+    issue_key: str,
+    environment: str = "integration",
+    expected_version: str = "",
+    auto_resolve: bool = True,
+) -> dict[str, Any]:
+    """Verify the UI version by opening a headless browser and reading the console.
+
+    Logs into the environment using credentials from AWS Secrets Manager,
+    captures browser console output, and checks Version/Build/Env.
+    Expected version is auto-detected from the ticket summary if not provided.
+    Set auto_resolve=False to dry-run without resolving.
+    """
+    jira = get_jira()
+    browser = get_browser()
+
+    result: dict[str, Any] = {
+        "status": "in_progress",
+        "issue_key": issue_key,
+        "environment": environment,
+    }
+
+    try:
+        issue = await jira.get_issue(issue_key)
+        if not issue:
+            return {"status": "error", "error": f"Issue {issue_key} not found"}
+    except Exception as e:
+        return {"status": "error", "error": f"Error fetching ticket: {e}"}
+
+    summary = issue["fields"].get("summary", "")
+    result["summary"] = summary
+
+    if not expected_version:
+        match = re.search(r"v?(\d+\.\d+\.\d+)", summary)
+        if match:
+            expected_version = match.group(1)
+        else:
+            return {"status": "error", "error": "Could not detect version from ticket. Provide expected_version."}
+
+    result["expected_version"] = expected_version
+
+    try:
+        build_info = await browser.get_ui_build_info(environment)
+        result["build_info"] = build_info
+    except Exception as e:
+        return {**result, "status": "error", "error": f"Browser check failed: {e}"}
+
+    if build_info.get("status") == "error":
+        return {**result, "status": "error", "error": build_info.get("error", "Unknown browser error")}
+
+    actual_version = build_info.get("version", "")
+    version_match = actual_version == expected_version
+
+    result["version_match"] = version_match
+    result["actual_version"] = actual_version
+
+    if not version_match:
+        result["status"] = "failed"
+        result["error"] = f"Version mismatch: expected {expected_version}, got {actual_version or 'not found'}"
+        return result
+
+    if auto_resolve:
+        try:
+            comment = (
+                "h3. QA Validation - PASS (UI Version Bump)\n\n"
+                f"*Environment:* {environment}\n"
+                f"*URL:* {build_info.get('url', 'N/A')}\n\n"
+                "||Check||Result||\n"
+                f"|Expected Version|{expected_version}|\n"
+                f"|Actual Version|{actual_version}|\n"
+                f"|Build|{build_info.get('build', 'N/A')}|\n"
+                f"|Reported Env|{build_info.get('reported_env', 'N/A')}|\n"
+                f"|Match|{version_match}|\n"
+            )
+            resolve_result = await jira.resolve_pass(issue_key, comment)
+            result["status"] = "success"
+            result["resolution"] = resolve_result
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = f"Failed to resolve ticket: {e}"
+    else:
+        result["status"] = "verified"
+        result["message"] = f"UI version {actual_version} matches expected {expected_version}. Set auto_resolve=True to resolve."
+
+    return result
 
 
 @mcp.tool()

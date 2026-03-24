@@ -12,6 +12,7 @@ __all__ = [
     "WebexClient",
     "AIClient",
     "SecretManager",
+    "BrowserClient",
 ]
 
 
@@ -38,4 +39,7 @@ def __getattr__(name: str):
     elif name == "SecretManager":
         from .ai import SecretManager
         return SecretManager
+    elif name == "BrowserClient":
+        from .browser import BrowserClient
+        return BrowserClient
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

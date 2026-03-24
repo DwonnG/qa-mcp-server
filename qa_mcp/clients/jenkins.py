@@ -50,6 +50,20 @@ class JenkinsClient:
             response = await client.get(url)
             response.raise_for_status()
             data = response.json()
+
+            causes = []
+            parameters = {}
+            for action in data.get("actions", []):
+                for cause in action.get("causes", []):
+                    causes.append({
+                        "type": cause.get("_class", ""),
+                        "description": cause.get("shortDescription", ""),
+                        "upstream_build": cause.get("upstreamBuild"),
+                        "upstream_project": cause.get("upstreamProject"),
+                    })
+                for param in action.get("parameters", []):
+                    parameters[param.get("name", "")] = param.get("value", "")
+
             return {
                 "status": "success",
                 "build_number": data.get("number"),
@@ -59,6 +73,8 @@ class JenkinsClient:
                 "duration": data.get("duration"),
                 "url": data.get("url"),
                 "display_name": data.get("displayName"),
+                "causes": causes,
+                "parameters": parameters,
             }
         except httpx.HTTPError as e:
             return {"status": "error", "error": str(e)}

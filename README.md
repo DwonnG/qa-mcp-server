@@ -199,6 +199,7 @@ See `config_example.py` for a template with documentation.
 
 ### Workflow Tools
 - `qa_get_ticket_context` - Full context (Jira + PRs + deployment)
+- `qa_verify_vulnerability_resolved` - Verify vuln fix: find PR, check merge, verify deployment, check tests, resolve ticket
 - `qa_verify_and_resolve_vulnerability` - One-click vuln verification
 
 ## 1-minute demo
