@@ -34,9 +34,7 @@ class BrowserClient:
 
     @property
     def secrets_manager(self):
-        if self._sm_client is None:
-            self._sm_client = boto3.client("secretsmanager", region_name=self.region)
-        return self._sm_client
+        return boto3.client("secretsmanager", region_name=self.region)
 
     def _generate_bypass_token(self, env: str) -> str:
         config = ENV_CONFIG.get(env)
