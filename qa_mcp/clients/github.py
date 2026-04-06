@@ -12,9 +12,9 @@ class GitHubClient:
     def __init__(self) -> None:
         host = os.getenv("GITHUB_HOST", "https://api.github.com")
         if "api.github.com" in host:
-            self.base_url = host
+            self.base_url = host.rstrip("/")
         else:
-            self.base_url = f"{host}/api/v3"
+            self.base_url = f"{host.rstrip('/')}/api/v3"
         self.token = os.getenv("GITHUB_TOKEN", "")
         self._client: httpx.AsyncClient | None = None
 
@@ -25,11 +25,14 @@ class GitHubClient:
                 headers["Authorization"] = f"Bearer {self.token}"
 
             self._client = httpx.AsyncClient(
-                base_url=self.base_url,
                 headers=headers,
                 timeout=30.0,
             )
         return self._client
+
+    def _url(self, path: str) -> str:
+        """Build a full URL from a relative path."""
+        return f"{self.base_url}/{path.lstrip('/')}"
 
     async def close(self) -> None:
         if self._client:
@@ -40,7 +43,7 @@ class GitHubClient:
         """Get commit details."""
         client = await self._get_client()
         try:
-            response = await client.get(f"/repos/{owner}/{repo}/commits/{sha}")
+            response = await client.get(self._url(f"/repos/{owner}/{repo}/commits/{sha}"))
             response.raise_for_status()
             data = response.json()
             return {
@@ -58,7 +61,7 @@ class GitHubClient:
         """Get PR details."""
         client = await self._get_client()
         try:
-            response = await client.get(f"/repos/{owner}/{repo}/pulls/{pr_number}")
+            response = await client.get(self._url(f"/repos/{owner}/{repo}/pulls/{pr_number}"))
             response.raise_for_status()
             data = response.json()
             return {
@@ -103,7 +106,7 @@ class GitHubClient:
         client = await self._get_client()
         try:
             response = await client.get(
-                f"/repos/{owner}/{repo}/commits/{sha}/pulls",
+                self._url(f"/repos/{owner}/{repo}/commits/{sha}/pulls"),
                 headers={"Accept": "application/vnd.github+json"},
             )
             response.raise_for_status()
@@ -129,7 +132,7 @@ class GitHubClient:
         client = await self._get_client()
         try:
             response = await client.get(
-                f"/repos/{owner}/{repo}/dependabot/alerts",
+                self._url(f"/repos/{owner}/{repo}/dependabot/alerts"),
                 params={"state": "open"},
             )
             response.raise_for_status()
@@ -162,7 +165,7 @@ class GitHubClient:
         found_prs = []
         try:
             response = await client.get(
-                f"/repos/{owner}/{repo}/pulls",
+                self._url(f"/repos/{owner}/{repo}/pulls"),
                 params={"state": state, "per_page": 100, "sort": "updated", "direction": "desc"},
             )
             response.raise_for_status()
@@ -196,7 +199,7 @@ class GitHubClient:
         client = await self._get_client()
         try:
             response = await client.get(
-                f"/repos/{owner}/{repo}/pulls",
+                self._url(f"/repos/{owner}/{repo}/pulls"),
                 params={"state": state, "per_page": limit, "sort": "updated", "direction": "desc"},
             )
             response.raise_for_status()
@@ -225,7 +228,7 @@ class GitHubClient:
         client = await self._get_client()
         try:
             response = await client.patch(
-                f"/repos/{owner}/{repo}/pulls/{pr_number}",
+                self._url(f"/repos/{owner}/{repo}/pulls/{pr_number}"),
                 json={"body": body},
             )
             response.raise_for_status()
