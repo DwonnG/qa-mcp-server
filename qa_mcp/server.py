@@ -9,6 +9,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
@@ -600,6 +601,65 @@ async def qa_compare_environments(repo: str, env1_name: str, env2_name: str) -> 
         comparison[env2_name]["latest_deploy"] = max(f["last_modified"] for f in env2_result["functions"])
 
     return comparison
+
+
+@mcp.tool()
+async def qa_invoke_internal_api(
+    environment: str,
+    api_name: str,
+    http_method: str,
+    path: str,
+    body: str = "",
+    query_string: str = "",
+) -> dict[str, Any]:
+    """Invoke an API Gateway endpoint via the AWS control plane.
+
+    Args:
+        environment: Target environment.
+        api_name: Logical API name.
+        http_method: HTTP method (GET, POST, PUT, PATCH, DELETE).
+        path: Resource path (template or concrete).
+        body: JSON request body for POST/PUT/PATCH requests.
+        query_string: Query parameters.
+    """
+    aws = get_aws()
+    try:
+        return aws.invoke_api(
+            environment=environment,
+            api_name=api_name,
+            http_method=http_method,
+            path=path,
+            body=body,
+            query_string=query_string,
+        )
+    except (ValueError, ClientError) as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@mcp.tool()
+async def qa_list_api_resources(
+    environment: str,
+    api_name: str,
+) -> dict[str, Any]:
+    """List all available resource paths for an API Gateway.
+
+    Args:
+        environment: Target environment.
+        api_name: Logical API name.
+    """
+    aws = get_aws()
+    try:
+        rest_api_id = aws.discover_rest_api(environment, api_name)
+        _ = aws.get_resource_id(rest_api_id, "/")
+        resources = aws._resource_cache.get(rest_api_id, {})
+        return {
+            "status": "success",
+            "api": f"{environment}_{api_name}",
+            "rest_api_id": rest_api_id,
+            "paths": sorted(resources.keys()),
+        }
+    except (ValueError, ClientError) as exc:
+        return {"status": "error", "error": str(exc)}
 
 
 @mcp.tool()
