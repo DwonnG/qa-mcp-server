@@ -11,6 +11,8 @@ class GitHubClient:
 
     def __init__(self) -> None:
         host = os.getenv("GITHUB_HOST", "https://api.github.com")
+        if not host.startswith("http"):
+            host = f"https://{host}"
         if "api.github.com" in host:
             self.base_url = host.rstrip("/")
         else:
