@@ -1076,6 +1076,62 @@ code {
   margin-bottom: 0;
 }
 
+/* Collapsible config block (Install section ----------------------------- */
+/* Same <details>/<summary> pattern as .failure, but visually neutral so it */
+/* reads as "optional reveal" instead of "error to expand". The summary    */
+/* gives a +/- affordance and a short hint chip; the <pre> inside inherits  */
+/* the global pre style so wrapping/scrolling already works on mobile.     */
+
+.config-toggle {
+  margin: 0.25rem 0 1rem;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.config-toggle > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--text);
+  list-style: none;
+}
+.config-toggle > summary::-webkit-details-marker {
+  display: none;
+}
+.config-toggle > summary::before {
+  content: "+";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 1rem;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+.config-toggle[open] > summary::before {
+  content: "−";
+}
+.config-toggle-label {
+  flex: 1;
+}
+.config-toggle-hint {
+  color: var(--text-tertiary);
+  font-size: 0.78rem;
+}
+.config-toggle-hint code {
+  font-size: 0.78rem;
+}
+.config-toggle > pre {
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
 /* Detail page ------------------------------------------------------------- */
 
 .detail {

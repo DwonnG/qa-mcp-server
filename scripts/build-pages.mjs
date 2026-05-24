@@ -311,7 +311,12 @@ function renderDashboard(tools) {
               need to be set &mdash; missing env vars just disable the
               matching tool group.
             </p>
-            <pre><code>{
+            <details class="config-toggle">
+              <summary>
+                <span class="config-toggle-label">Show full MCP client config</span>
+                <span class="config-toggle-hint"><code>mcp.json</code> snippet</span>
+              </summary>
+              <pre><code>{
   "mcpServers": {
     "qa-automation": {
       "command": "docker",
@@ -332,6 +337,7 @@ function renderDashboard(tools) {
     }
   }
 }</code></pre>
+            </details>
             <p>
               Mount a <code>config.py</code> (copy from
               <code>config_example.py</code>) for org-specific Jira field

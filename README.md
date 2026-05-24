@@ -4,7 +4,7 @@ An AI-powered QA automation server built on the [Model Context Protocol (MCP)](h
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fdwonng%2Fqa--mcp--server-blue)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fdwonng%2Fqa--mcp--server-blue)](https://github.com/DwonnG/qa-mcp-server/pkgs/container/qa-mcp-server)
 [![Pages](https://github.com/DwonnG/qa-mcp-server/actions/workflows/pages.yml/badge.svg)](https://github.com/DwonnG/qa-mcp-server/actions/workflows/pages.yml)
 
 > **Tool catalog:** [dwonng.github.io/qa-mcp-server](https://dwonng.github.io/qa-mcp-server/) — auto-generated from the `@mcp.tool()` decorators in `qa_mcp/server.py` on every push to `main`.
@@ -101,8 +101,8 @@ Add to your MCP configuration (`~/.cursor/mcp.json`):
            "-e", "JENKINS_TOKEN=your_token",
            "-e", "AWS_REGION=us-east-1",
            "-e", "WEBEX_TOKEN=your_webex_token",
-           "-v", "/path/to/.aws:/root/.aws:ro",
-           "-v", "/path/to/config.py:/app/config.py:ro",
+           "-v", "$HOME/.aws:/root/.aws:ro",
+           "-v", "$HOME/.config/qa-mcp-server/config.py:/app/config.py:ro",
            "ghcr.io/dwonng/qa-mcp-server:latest"
          ]
        }
