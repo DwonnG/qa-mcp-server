@@ -402,6 +402,7 @@ function baseLayout({ title, body }) {
         <span>mcp-server</span>
       </a>
       <div class="nav-links">
+        <a class="nav-back" href="https://dwonng.github.io/#work">&larr; Portfolio</a>
         <a href="${PAGES_BASE}/#jira">Tools</a>
         <a href="${PAGES_BASE}/#install">Install</a>
         <a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">GitHub</a>
