@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Theme-aware monogram tile. Inline media queries let the favicon
+       follow the OS palette so it doesn't read as a dark blob on a light
+       browser chrome (and vice versa). Mirrors the portfolio favicon
+       recipe so the lab feels like part of the same brand. -->
+  <style>
+    .bg { fill: #54607a; }
+    .fg { fill: #ffffff; }
+    @media (prefers-color-scheme: light) {
+      .bg { fill: #455374; }
+    }
+  </style>
+  <rect class="bg" width="32" height="32" rx="7" />
+  <text
+    class="fg"
+    x="16"
+    y="22"
+    text-anchor="middle"
+    font-family="Newsreader, Georgia, serif"
+    font-size="17"
+    font-weight="600"
+    letter-spacing="-0.04em"
+  >QA</text>
+</svg>

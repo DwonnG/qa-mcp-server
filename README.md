@@ -5,6 +5,9 @@ An AI-powered QA automation server built on the [Model Context Protocol (MCP)](h
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fdwonng%2Fqa--mcp--server-blue)
+[![Pages](https://github.com/DwonnG/qa-mcp-server/actions/workflows/pages.yml/badge.svg)](https://github.com/DwonnG/qa-mcp-server/actions/workflows/pages.yml)
+
+> **Tool catalog:** [dwonng.github.io/qa-mcp-server](https://dwonng.github.io/qa-mcp-server/) — auto-generated from the `@mcp.tool()` decorators in `qa_mcp/server.py` on every push to `main`.
 
 ## Features
 
