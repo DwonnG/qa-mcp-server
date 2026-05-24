@@ -832,12 +832,14 @@ code {
 }
 /* Let long underscored tool names wrap inside the flex row without
    pushing the chip off the card. min-width: 0 lets the h3 actually
-   shrink, overflow-wrap: anywhere breaks at underscores / mid-word
-   so the title never overflows the card. */
+   shrink. break-word (instead of anywhere) means the browser will
+   prefer the <wbr> break points injected after each underscore in
+   the tool name over breaking mid-word — so qa_verify_vulnerability
+   _resolved wraps between underscores, not in the middle of "verify". */
 .suite-card-head h3 {
   flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 /* Chip never wraps or shrinks — it sits flush right on its own line
    width. white-space: nowrap prevents "COMPOSITE" from truncating to

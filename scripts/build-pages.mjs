@@ -192,12 +192,22 @@ function esc(value) {
     .replace(/'/gu, "&#39;");
 }
 
+// Tool names are snake_case (e.g. qa_verify_vulnerability_resolved) and
+// underscores are not break opportunities for browsers — without a hint,
+// CSS would break the name mid-word. Inserting <wbr> after every
+// underscore gives the browser preferred break points so a long name
+// wraps at underscore boundaries (preserving whole words) and only
+// falls back to mid-word breaks if a single segment is still too long.
+function nameWithBreaks(name) {
+  return esc(name).replace(/_/gu, "_<wbr>");
+}
+
 function renderToolCard(tool) {
   const href = `${REPO_URL}/blob/${BRANCH}/qa_mcp/server.py#L${tool.line}`;
   return `
     <a class="suite-card suite-card--idle" href="${esc(href)}" target="_blank" rel="noopener noreferrer">
       <div class="suite-card-head">
-        <h3><code>${esc(tool.name)}</code></h3>
+        <h3><code>${nameWithBreaks(tool.name)}</code></h3>
         <span class="status-chip status-chip--idle">${esc(tool.category)}</span>
       </div>
       <p class="suite-card-desc">${esc(tool.description)}</p>
