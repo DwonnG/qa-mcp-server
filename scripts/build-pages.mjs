@@ -224,11 +224,22 @@ function renderCategorySection(category, tools, index) {
 }
 
 function renderHeroMetrics(tools, groups) {
+  // Use the portfolio's .metrics / .metric* tokens so spacing, borders, and
+  // typography match the qa-automation-lab and qa-agent-skills sites.
   return `
-    <div class="hero-metrics" role="list">
-      <div role="listitem"><span class="num">${tools.length}</span><span>tools</span></div>
-      <div role="listitem"><span class="num">${groups.length}</span><span>services</span></div>
-      <div role="listitem"><span class="num">FastMCP</span><span>stdio + http</span></div>
+    <div class="metrics" aria-label="Server summary">
+      <div class="metric">
+        <span class="metric-value">${tools.length}</span>
+        <span class="metric-label">Tools</span>
+      </div>
+      <div class="metric">
+        <span class="metric-value">${groups.length}</span>
+        <span class="metric-label">Services</span>
+      </div>
+      <div class="metric">
+        <span class="metric-value">FastMCP</span>
+        <span class="metric-label">stdio + http</span>
+      </div>
     </div>
   `;
 }
@@ -382,10 +393,7 @@ function baseLayout({ title, body }) {
         <span>mcp-server</span>
       </a>
       <div class="nav-links">
-        <a href="${PAGES_BASE}/#jira">Jira</a>
-        <a href="${PAGES_BASE}/#aws">AWS</a>
-        <a href="${PAGES_BASE}/#jenkins">Jenkins</a>
-        <a href="${PAGES_BASE}/#github">GitHub</a>
+        <a href="${PAGES_BASE}/#jira">Tools</a>
         <a href="${PAGES_BASE}/#install">Install</a>
         <a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">GitHub</a>
       </div>
