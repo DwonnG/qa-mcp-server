@@ -823,9 +823,29 @@ code {
 .suite-card-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  /* flex-start so a 2-line tool name (e.g. qa_verify_vulnerability_resolved)
+     keeps the category chip aligned to the first line instead of
+     centering vertically and getting visually crowded. */
+  align-items: flex-start;
   margin-bottom: 0.75rem;
-  gap: 0.5rem;
+  gap: 0.65rem;
+}
+/* Let long underscored tool names wrap inside the flex row without
+   pushing the chip off the card. min-width: 0 lets the h3 actually
+   shrink, overflow-wrap: anywhere breaks at underscores / mid-word
+   so the title never overflows the card. */
+.suite-card-head h3 {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Chip never wraps or shrinks — it sits flush right on its own line
+   width. white-space: nowrap prevents "COMPOSITE" from truncating to
+   "CC..." when the column is tight. */
+.suite-card-head .status-chip,
+.suite-card-head .layer-pill {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .layer-pill {
   font-size: 0.62rem;
