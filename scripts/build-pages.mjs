@@ -299,21 +299,46 @@ function renderDashboard(tools) {
           </div>
           <div class="about-card">
             <p>
-              Clone the repo, install the Python deps, copy
-              <code>config_example.py</code> to <code>config.py</code>, and
-              point your MCP client (Claude Desktop, Cursor, etc.) at
-              <code>run.py</code> via stdio or HTTP.
+              The server is published as a public container image on GHCR &mdash;
+              no clone, no Python setup. Pull it once, then point your MCP
+              client (Cursor, Claude Desktop, etc.) at <code>docker run</code>
+              over stdio.
             </p>
-            <pre><code>git clone ${REPO_URL}.git
-cd qa-mcp-server
-pip install -r requirements.txt
-cp config_example.py config.py
-python run.py</code></pre>
+            <pre><code>docker pull ghcr.io/dwonng/qa-mcp-server:latest</code></pre>
             <p>
-              Most tools need credentials in <code>.env</code> &mdash; Jira
-              token, Jenkins user, AWS profile, GitHub token, Webex bot
-              token. See the README for the per-service env vars and the
-              IAM permissions each tool needs.
+              Add the server to <code>~/.cursor/mcp.json</code> (or your
+              Claude Desktop config). Only the credentials you actually use
+              need to be set &mdash; missing env vars just disable the
+              matching tool group.
+            </p>
+            <pre><code>{
+  "mcpServers": {
+    "qa-automation": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "JIRA_URL=https://your-jira.atlassian.net",
+        "-e", "JIRA_PERSONAL_TOKEN=your_token",
+        "-e", "GITHUB_TOKEN=ghp_your_token",
+        "-e", "JENKINS_URL=https://your-jenkins.com",
+        "-e", "JENKINS_USER=your_user",
+        "-e", "JENKINS_TOKEN=your_token",
+        "-e", "AWS_REGION=us-east-1",
+        "-e", "WEBEX_TOKEN=your_webex_token",
+        "-v", "$HOME/.aws:/root/.aws:ro",
+        "-v", "$HOME/.config/qa-mcp-server/config.py:/app/config.py:ro",
+        "ghcr.io/dwonng/qa-mcp-server:latest"
+      ]
+    }
+  }
+}</code></pre>
+            <p>
+              Mount a <code>config.py</code> (copy from
+              <code>config_example.py</code>) for org-specific Jira field
+              IDs, Jenkins job paths, and JQL templates. See the
+              <a href="${REPO_URL}#readme" target="_blank" rel="noopener noreferrer">README</a>
+              for the full env-var matrix, IAM permissions each tool needs,
+              and the local Python path if you'd rather run from source.
             </p>
           </div>
         </section>
