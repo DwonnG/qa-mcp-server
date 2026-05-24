@@ -262,7 +262,6 @@ function renderDashboard(tools) {
       <header class="hero">
         <div class="hero-inner">
           <div class="hero-intro">
-            <div class="hero-mark" aria-hidden="true">QA</div>
             <span class="status-badge status-badge--ok">
               <span class="status-dot"></span>
               <span>${tools.length} tools across ${groups.length} services</span>
