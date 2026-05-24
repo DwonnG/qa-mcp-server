@@ -36,6 +36,54 @@
     });
   }
 
+  // ---- Mobile hamburger menu ---------------------------------------------
+  // Below 768px the desktop .nav-links bar is hidden and replaced by a
+  // slide-down panel. Open/close via the toggle button, ESC key, or by
+  // tapping a link inside the panel. Mirrors the portfolio's main.js so
+  // the chrome behaves identically across all four DwonnG sites.
+  var navToggle = document.querySelector(".nav-toggle");
+  var mobileMenu = document.getElementById("mobile-menu");
+  if (navToggle && mobileMenu) {
+    var setMenuOpen = function (open) {
+      navToggle.setAttribute("aria-expanded", String(open));
+      navToggle.setAttribute(
+        "aria-label",
+        open ? "Close navigation menu" : "Open navigation menu",
+      );
+      mobileMenu.setAttribute("aria-hidden", String(!open));
+      mobileMenu.classList.toggle("is-open", open);
+      document.body.classList.toggle("menu-open", open);
+    };
+    navToggle.addEventListener("click", function () {
+      var isOpen = navToggle.getAttribute("aria-expanded") === "true";
+      setMenuOpen(!isOpen);
+    });
+    var menuLinks = mobileMenu.querySelectorAll("a");
+    for (var i = 0; i < menuLinks.length; i++) {
+      menuLinks[i].addEventListener("click", function () {
+        setMenuOpen(false);
+      });
+    }
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      if (navToggle.getAttribute("aria-expanded") !== "true") return;
+      setMenuOpen(false);
+      navToggle.focus();
+    });
+    // If the viewport grows past the mobile breakpoint while the menu is
+    // open (e.g. rotating a tablet), close it so the desktop nav takes
+    // over cleanly. Matches the @media rule in styles.css.
+    var desktopMq = window.matchMedia("(min-width: 768px)");
+    var onDesktop = function (e) {
+      if (e.matches) setMenuOpen(false);
+    };
+    if (typeof desktopMq.addEventListener === "function") {
+      desktopMq.addEventListener("change", onDesktop);
+    } else if (typeof desktopMq.addListener === "function") {
+      desktopMq.addListener(onDesktop);
+    }
+  }
+
   // ---- Scrolled nav state -------------------------------------------------
   // Adds .is-scrolled to .top-nav once the page leaves the top, which
   // strengthens the nav background + border so it reads against scrolled
