@@ -381,6 +381,37 @@ code {
   transform: scaleX(1);
 }
 
+.nav-links .nav-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.nav-back__icon {
+  width: 0.95em;
+  height: 0.95em;
+  flex-shrink: 0;
+}
+
+.nav-back--mobile {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  padding: 0.5rem 0.5rem;
+  min-height: 40px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.2s var(--ease-out);
+}
+.nav-back--mobile:hover,
+.nav-back--mobile:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
 .nav-end {
   display: flex;
   align-items: center;
@@ -535,6 +566,12 @@ code {
 @media (max-width: 767px) {
   .nav-toggle {
     display: inline-flex;
+  }
+  .nav-back--mobile {
+    display: inline-flex;
+  }
+  .nav-brand-full {
+    display: none;
   }
   /* Lock body scroll while the panel is open so the page doesn't scroll
      behind the overlay. Scoped to mobile widths so it can't leak. */
